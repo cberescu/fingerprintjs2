@@ -105,18 +105,21 @@
       keys = this.hasLiedBrowserKey(keys);
       keys = this.touchSupportKey(keys);
       var that = this;
-      this.fontsKey(keys, function(newKeys){
-        var values = [];
-        that.each(newKeys, function(pair) {
-          var value = pair.value;
-          if (typeof pair.value.join !== "undefined") {
-            value = pair.value.join(";");
-          }
-          values.push(value);
-        });
-        var murmur = that.x64hash128(values.join("~~~"), 31);
-        return done(murmur, newKeys);
-      });
+	  
+	  this.audioKey(keys,function(newKeys){
+		  that.fontsKey(newKeys, function(newKeys){
+			var values = [];
+			that.each(newKeys, function(pair) {
+			  var value = pair.value;
+			  if (typeof pair.value.join !== "undefined") {
+				value = pair.value.join(";");
+			  }
+			  values.push(value);
+			});
+			var murmur = that.x64hash128(values.join("~~~"), 31);
+			return done(murmur, newKeys);
+		  });
+	  });
     },
     userAgentKey: function(keys) {
       if(!this.options.excludeUserAgent) {
@@ -498,6 +501,63 @@
         done(keys);
       }, 1);
     },
+	audioKey: function(keys,done){
+		
+		if ((!this.options.excludeAudio) && !(("ontouchstart" in window) || (navigator.maxTouchPoints > 0) || (navigator.msMaxTouchPoints > 0))) {
+			return this.getAudioKey(keys, done);
+		}
+		return done(keys);
+	},
+	getAudioKey: function(keys,done) {
+		var that = this;
+
+		var getOfflineAudioBuffer = function(callback) {
+			var context;
+			try {	
+				if (context = new(window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100), !context) {
+					return callback();
+				}
+				// Create oscillator
+				var pxiOscillator = context.createOscillator();
+				pxiOscillator.type = "triangle";
+				pxiOscillator.frequency.value = 1e4;
+				
+				// Create and configure compressor
+				var pxiCompressor = context.createDynamicsCompressor();
+				pxiCompressor.threshold && (pxiCompressor.threshold.value = -50);
+				pxiCompressor.knee && (pxiCompressor.knee.value = 40);
+				pxiCompressor.ratio && (pxiCompressor.ratio.value = 12);
+				pxiCompressor.reduction && (pxiCompressor.reduction.value = -20);
+				pxiCompressor.attack && (pxiCompressor.attack.value = 0);
+				pxiCompressor.release && (pxiCompressor.release.value = .25);
+
+				// Connect nodes
+				pxiOscillator.connect(pxiCompressor);
+				pxiCompressor.connect(context.destination);
+				
+				// Start audio processing
+				pxiOscillator.start(0);
+				context.startRendering();
+				
+				context.oncomplete = function(evnt) {
+					var memo = evnt.renderedBuffer.getChannelData(0).join(',');
+					//memo = that.x64hash128(memo, 31);
+					
+					pxiCompressor.disconnect();
+					return callback(memo);
+				}
+			} catch (u) {
+				return callback();
+			}
+		}
+		
+		var pushKey = function(key){
+			key = key || '';
+			keys.push({key: "audio", value: key});
+			done(keys);
+		}
+		getOfflineAudioBuffer(pushKey);
+	},
     pluginsKey: function(keys) {
       if(!this.options.excludePlugins){
         if(this.isIE()){
